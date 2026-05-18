@@ -1,0 +1,24 @@
+python src/main.py \
+    --output_dir experiments \
+    --comment "classification from Scratch" \
+    --name DuckDuckGeese \
+    --records_file Classification_records.xls \
+    --data_dir ./datasets/DuckDuckGeese \
+    --data_class tsra \
+    --pattern TRAIN \
+    --val_pattern TEST \
+    --epochs 100 \
+    --lr 0.0005 \
+    --patch_size 16 \
+    --stride 2 \
+    --optimizer AdamW \
+    --d_model 768 \
+    --pos_encoding learnable \
+    --task classification \
+    --key_metric accuracy \
+    --gpu 1 \
+    --seed 42 \
+    --gpt_layers 6 \
+    --num_mamba_layers 0 \
+    --no_stat_prompt \
+    --no_attn_pooling

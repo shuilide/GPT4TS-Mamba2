@@ -1,0 +1,20 @@
+python src/main.py \
+    --output_dir experiments \
+    --comment "classification from Scratch" \
+    --name EthanolConcentration \
+    --records_file Classification_records.xls \
+    --data_dir ./datasets/EthanolConcentration \
+    --data_class tsra \
+    --pattern TRAIN \
+    --val_pattern TEST \
+    --epochs 100 \
+    --lr 0.0001 \
+    --patch_size 16 \
+    --stride 8 \
+    --optimizer AdamW \
+    --d_model 768 \
+    --pos_encoding learnable \
+    --task classification \
+    --key_metric accuracy \
+    --gpu 5 \
+    --seed 42
