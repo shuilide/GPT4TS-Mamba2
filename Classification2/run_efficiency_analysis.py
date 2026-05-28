@@ -102,7 +102,9 @@ def run_efficiency_experiment(args):
     save_path_mamba = os.path.join(output_dir, 'mamba_gpt_results.csv')
     results_mamba = profiler_mamba.profile_sequence_lengths(
         seq_lengths, feat_dim, args.batch_size, 
-        args.patch_size, args.stride, save_path_mamba
+        args.patch_size, args.stride, save_path_mamba,
+        measure_throughput=True,
+        measure_flops=True
     )
     results_dict['MambaGPT'] = results_mamba
     
@@ -128,7 +130,9 @@ def run_efficiency_experiment(args):
     save_path_gpt = os.path.join(output_dir, 'pure_gpt2_results.csv')
     results_gpt = profiler_gpt.profile_sequence_lengths(
         seq_lengths, feat_dim, args.batch_size,
-        args.patch_size, args.stride, save_path_gpt
+        args.patch_size, args.stride, save_path_gpt,
+        measure_throughput=True,
+        measure_flops=True
     )
     results_dict['PureGPT2'] = results_gpt
     
@@ -136,32 +140,32 @@ def run_efficiency_experiment(args):
     del model_gpt
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
     
-    # ========================================
-    # 测试3: 消融变体（可选）
-    # ========================================
-    if args.test_variants:
-        print("\n" + "="*80)
-        print("测试3: MambaGPT (no stat prompt, no attn pooling)")
-        print("="*80)
-        
-        config_variant = base_config.copy()
-        config_variant['num_mamba_layers'] = args.num_mamba_layers
-        config_variant['no_stat_prompt'] = True
-        config_variant['no_attn_pooling'] = True
-        
-        model_variant = gpt4ts(config_variant, data_mock).to(device)
-        profiler_variant = EfficiencyProfiler(model_variant, device)
-        
-        save_path_variant = os.path.join(output_dir, 'mamba_gpt_variant_results.csv')
-        results_variant = profiler_variant.profile_sequence_lengths(
-            seq_lengths, feat_dim, args.batch_size,
-            args.patch_size, args.stride, save_path_variant
-        )
-        results_dict['MambaGPT_Variant'] = results_variant
-        
-        del model_variant
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
-    
+    # # ========================================
+    # # 测试3: 消融变体（可选）
+    # # ========================================
+    # if args.test_variants:
+    #     print("\n" + "="*80)
+    #     print("测试3: MambaGPT (no stat prompt, no attn pooling)")
+    #     print("="*80)
+    #
+    #     config_variant = base_config.copy()
+    #     config_variant['num_mamba_layers'] = args.num_mamba_layers
+    #     config_variant['no_stat_prompt'] = True
+    #     config_variant['no_attn_pooling'] = True
+    #
+    #     model_variant = gpt4ts(config_variant, data_mock).to(device)
+    #     profiler_variant = EfficiencyProfiler(model_variant, device)
+    #
+    #     save_path_variant = os.path.join(output_dir, 'mamba_gpt_variant_results.csv')
+    #     results_variant = profiler_variant.profile_sequence_lengths(
+    #         seq_lengths, feat_dim, args.batch_size,
+    #         args.patch_size, args.stride, save_path_variant
+    #     )
+    #     results_dict['MambaGPT_Variant'] = results_variant
+    #
+    #     del model_variant
+    #     torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    #
     # ========================================
     # 对比分析
     # ========================================

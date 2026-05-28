@@ -244,6 +244,94 @@ def plot_scaling_analysis(results_dict, output_path, dataset_name):
     plt.close()
 
 
+def plot_throughput_comparison(results_dict, output_path, dataset_name):
+    """
+    绘制吞吐量对比图
+    """
+    plt.figure(figsize=(12, 8))
+    
+    colors = {'MambaGPT': 'blue', 'PureGPT2': 'red', 'MambaGPT_Variant': 'green'}
+    markers = {'MambaGPT': 'o', 'PureGPT2': 's', 'MambaGPT_Variant': '^'}
+    
+    for model_name, data in results_dict.items():
+        seq_lengths = [int(d['seq_length']) for d in data]
+        throughputs = [float(d['throughput']) for d in data if 'throughput' in d]
+        
+        # 过滤掉失败的数据
+        valid_data = [(s, t) for s, t in zip(seq_lengths, throughputs) if t > 0]
+        if not valid_data:
+            continue
+        
+        valid_seq, valid_throughput = zip(*valid_data)
+        
+        color = colors.get(model_name, 'gray')
+        marker = markers.get(model_name, 'o')
+        
+        plt.plot(valid_seq, valid_throughput,
+                marker=marker, linewidth=2, markersize=8,
+                label=model_name, color=color)
+    
+    plt.xlabel('Sequence Length', fontsize=14, fontweight='bold')
+    plt.ylabel('Throughput (samples/sec)', fontsize=14, fontweight='bold')
+    plt.title(f'Throughput Comparison - {dataset_name}', fontsize=16, fontweight='bold')
+    plt.legend(fontsize=12, loc='upper right')
+    plt.grid(True, alpha=0.3, linestyle='--')
+    plt.tight_layout()
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✓ 吞吐量对比图已保存: {output_path}")
+    plt.close()
+
+
+def plot_flops_params_table(results_dict, output_path, dataset_name):
+    """
+    绘制 FLOPs 和参数量对比表
+    """
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # 准备表格数据
+    table_data = []
+    headers = ['Model', 'FLOPs', 'Parameters']
+    
+    for model_name, data in results_dict.items():
+        if len(data) > 0 and 'flops_str' in data[0]:
+            flops_str = data[0]['flops_str']
+            params_str = data[0]['params_str']
+            table_data.append([model_name, flops_str, params_str])
+    
+    if not table_data:
+        print("⚠️  没有 FLOPs 数据，跳过表格生成")
+        return
+    
+    # 创建表格
+    table = ax.table(cellText=table_data,
+                    colLabels=headers,
+                    loc='center',
+                    cellLoc='center')
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1.2, 1.8)
+    
+    # 设置表头样式
+    for (i, j), cell in table.get_celld().items():
+        if i == 0:
+            cell.set_text_props(weight='bold')
+            cell.set_facecolor('#4472C4')
+            cell.set_text_props(color='white')
+    
+    plt.title(f'FLOPs & Parameters Comparison - {dataset_name}', fontsize=16, fontweight='bold', pad=20)
+    plt.tight_layout()
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✓ FLOPs/参数量对比表已保存: {output_path}")
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='效率分析结果可视化')
     parser.add_argument('--input_dir', type=str, required=True,
@@ -270,12 +358,6 @@ def main():
         results_dict['PureGPT2'] = load_csv(gpt_path)
         print(f"✓ 加载 PureGPT2 结果: {len(results_dict['PureGPT2'])} 条记录")
     
-    # 加载变体结果
-    variant_path = os.path.join(args.input_dir, 'mamba_gpt_variant_results.csv')
-    if os.path.exists(variant_path):
-        results_dict['MambaGPT_Variant'] = load_csv(variant_path)
-        print(f"✓ 加载 MambaGPT_Variant 结果: {len(results_dict['MambaGPT_Variant'])} 条记录")
-    
     if not results_dict:
         print("❌ 未找到任何结果文件！")
         return
@@ -297,14 +379,28 @@ def main():
         args.dataset
     )
     
-    # 3. 组合对比
+    # 3. 吞吐量对比
+    plot_throughput_comparison(
+        results_dict,
+        os.path.join(args.output_dir, f'{args.dataset}_throughput_comparison.png'),
+        args.dataset
+    )
+    
+    # 4. FLOPs/参数量对比表
+    plot_flops_params_table(
+        results_dict,
+        os.path.join(args.output_dir, f'{args.dataset}_flops_params_table.png'),
+        args.dataset
+    )
+    
+    # 5. 组合对比
     plot_combined_comparison(
         results_dict,
         os.path.join(args.output_dir, f'{args.dataset}_combined_comparison.png'),
         args.dataset
     )
     
-    # 4. 缩放分析
+    # 6. 缩放分析
     plot_scaling_analysis(
         results_dict,
         os.path.join(args.output_dir, f'{args.dataset}_scaling_analysis.png'),
