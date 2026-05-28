@@ -95,7 +95,47 @@ class gpt4ts(nn.Module):
         self.enc_embedding = DataEmbedding(self.feat_dim * self.patch_size, config['d_model'], config['dropout'])
 
         # ✅ 修复2：关闭不必要的输出，节省显存
-        self.gpt2 = GPT2Model.from_pretrained('gpt2')
+        self.gpt2 = GPT2Model.from_pretrained('gpt2', output_hidden_states=False, output_attentions=False)
+        
+        # ✅ 修复5：扩展GPT-2位置编码以支持长序列（使用线性插值）
+        # 计算最大可能的patch数量（考虑padding和prompt token）
+        max_patch_num = (self.max_len - self.patch_size) // self.stride + 2  # +1 padding + 1 prompt
+        
+        if max_patch_num > self.gpt2.config.n_positions:
+            old_n_positions = self.gpt2.config.n_positions
+            
+            # 获取原始位置编码权重
+            old_wpe_weight = self.gpt2.wpe.weight.data.clone()  # [1024, 768]
+            
+            # 使用线性插值创建新的位置编码
+            new_wpe_weight = torch.zeros(max_patch_num, self.d_model)
+            with torch.no_grad():
+                for i in range(max_patch_num):
+                    # 计算在原始编码中的对应位置（可能是小数）
+                    original_pos = i * (old_n_positions - 1) / (max_patch_num - 1)
+                    
+                    # 找到相邻的两个整数位置
+                    low = int(original_pos)
+                    high = min(low + 1, old_n_positions - 1)
+                    
+                    # 计算插值权重
+                    fraction = original_pos - low
+                    
+                    # 线性插值
+                    new_wpe_weight[i] = (1 - fraction) * old_wpe_weight[low] + fraction * old_wpe_weight[high]
+            
+            # 创建新的位置编码层并替换
+            new_wpe = nn.Embedding(max_patch_num, self.d_model)
+            new_wpe.weight.data = new_wpe_weight
+            
+            # 替换模型中的位置编码
+            self.gpt2.wpe = new_wpe
+            
+            # 重要：同时更新两个配置项
+            self.gpt2.config.n_positions = max_patch_num
+            self.gpt2.config.max_position_embeddings = max_patch_num
+            
+            print(f"✓ Extended GPT2 position encoding with interpolation: {old_n_positions} -> {max_patch_num}")
 
         # ==========================================
         # 创新点1：时序统计特征 Prompt（支持消融）
@@ -156,9 +196,11 @@ class gpt4ts(nn.Module):
             self.out_layer = nn.Linear(self.d_model, self.num_classes)
             print("✓ Innovation 3: Attn Pooling enabled")
         else:
-            self.ln_proj = nn.LayerNorm(config['d_model'] * self.patch_num)
-            self.out_layer = nn.Linear(config['d_model'] * self.patch_num, self.num_classes)
-            print("✓ Innovation 3: Attn Pooling disabled, using Flatten")
+            # ✅ 修复6：使用自适应池化支持任意长度序列
+            self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
+            self.ln_proj = nn.LayerNorm(self.d_model)
+            self.out_layer = nn.Linear(self.d_model, self.num_classes)
+            print("✓ Innovation 3: Attn Pooling disabled, using Adaptive Pooling")
 
     def forward(self, x_enc, x_mark_enc, x_dec=None, x_mark_dec=None, mask=None):
         B, L, M = x_enc.shape
@@ -198,7 +240,10 @@ class gpt4ts(nn.Module):
             pooled_out = self.pool_ln(pooled_out)
             outputs = self.out_layer(pooled_out)
         else:
-            outputs = outputs.reshape(B, -1)
+            # ✅ 使用自适应池化支持任意长度
+            # outputs shape: [B, N, D] -> [B, D, N] for AdaptiveAvgPool1d
+            outputs = outputs.transpose(1, 2)  # [B, D, N]
+            outputs = self.adaptive_pool(outputs).squeeze(-1)  # [B, D]
             outputs = self.ln_proj(outputs)
             outputs = self.out_layer(outputs)
 

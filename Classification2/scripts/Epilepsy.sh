@@ -16,9 +16,8 @@ python src/main.py \
     --pos_encoding learnable \
     --task classification \
     --key_metric accuracy \
-    --gpu 0 \
+    --gpu 3 \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 0 \
     --no_stat_prompt \
-    --no_attn_pooling

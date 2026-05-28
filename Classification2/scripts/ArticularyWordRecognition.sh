@@ -1,3 +1,5 @@
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 python src/main.py \
     --output_dir experiments \
     --comment "classification from Scratch" \
