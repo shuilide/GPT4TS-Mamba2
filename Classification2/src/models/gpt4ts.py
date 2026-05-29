@@ -72,6 +72,15 @@ class ParallelMambaAdapter(nn.Module):
         # present=None表示不使用缓存，不影响训练和推理
         return (output, None)
 
+    def get_gate_value(self):
+        """获取当前 gate 参数的值（用于实验二追踪）"""
+        return self.gate.item()
+
+    def set_gate_initial(self, initial_value=0.1):
+        """设置 gate 的初始值（用于实验）"""
+        with torch.no_grad():
+            self.gate.fill_(initial_value)
+
 class gpt4ts(nn.Module):
     def __init__(self, config, data):
         super(gpt4ts, self).__init__()
@@ -248,3 +257,11 @@ class gpt4ts(nn.Module):
             outputs = self.out_layer(outputs)
 
         return outputs
+
+    def get_all_gate_values(self):
+        """获取所有 ParallelMambaAdapter 层的 gate 值（用于实验二）"""
+        gate_values = {}
+        for name, module in self.gpt2.named_modules():
+            if isinstance(module, ParallelMambaAdapter):
+                gate_values[name] = module.get_gate_value()
+        return gate_values

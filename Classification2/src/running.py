@@ -467,7 +467,10 @@ class SupervisedRunner(BaseRunner):
             total_samples += len(loss)
             epoch_loss += batch_loss  # add total loss of batch
 
-        epoch_loss = epoch_loss / total_samples  # average loss per element for whole epoch
+        if total_samples > 0:
+            epoch_loss = epoch_loss / total_samples  # average loss per element for whole epoch
+        else:
+            epoch_loss = 0.0
         self.epoch_metrics['epoch'] = epoch_num
         self.epoch_metrics['loss'] = epoch_loss
 
