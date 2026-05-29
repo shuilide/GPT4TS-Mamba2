@@ -24,10 +24,11 @@ class GateTracker:
         self.output_dir = output_dir
         self.num_layers = num_layers
         
-        # 存储每个 epoch 的 gate 值
+        # 存储每个 epoch 的 gate 值和 accuracy
         self.gate_history = {
             'epochs': [],
             'gate_values': {},  # {layer_name: [value_per_epoch]}
+            'accuracy': [],  # [accuracy_per_epoch]
             'metadata': {
                 'initial_value': 0.1,
                 'num_layers': num_layers,
@@ -41,13 +42,14 @@ class GateTracker:
         
         logger.info(f"GateTracker initialized: tracking {num_layers} Mamba adapter layers")
     
-    def record_epoch_gates(self, epoch, model):
+    def record_epoch_gates(self, epoch, model, accuracy=None):
         """
-        记录当前 epoch 所有 Mamba 层的 gate 值
+        记录当前 epoch 所有 Mamba 层的 gate 值和 accuracy
         
         Args:
             epoch: 当前 epoch 编号
             model: gpt4ts 模型实例
+            accuracy: 验证集上的 accuracy（可选）
         """
         # 获取所有 gate 值
         gate_values = model.get_all_gate_values()
@@ -60,10 +62,16 @@ class GateTracker:
                 self.gate_history['gate_values'][layer_name] = []
             self.gate_history['gate_values'][layer_name].append(gate_value)
         
-        # 打印当前 gate 值
+        # 记录 accuracy
+        if accuracy is not None:
+            self.gate_history['accuracy'].append(accuracy)
+        
+        # 打印当前 gate 值和 accuracy
         gate_str = f"Epoch {epoch} - Gate values: "
         for layer_name, value in gate_values.items():
             gate_str += f"{layer_name}={value:.4f}, "
+        if accuracy is not None:
+            gate_str += f"Accuracy={accuracy:.4f}"
         logger.info(gate_str.rstrip(", "))
         
         # 每 10 个 epoch 保存一次
@@ -135,13 +143,14 @@ class GateTracker:
         # 写入 CSV
         with open(csv_path, 'w') as f:
             # 表头
-            header = "epoch," + ",".join(layer_names) + "\n"
+            header = "epoch," + ",".join(layer_names) + ",accuracy\n"
             f.write(header)
             
             # 数据行
             for i, epoch in enumerate(self.gate_history['epochs']):
                 values = [str(self.gate_history['gate_values'][layer][i]) for layer in layer_names]
-                line = f"{epoch}," + ",".join(values) + "\n"
+                acc = str(self.gate_history['accuracy'][i]) if i < len(self.gate_history['accuracy']) else ""
+                line = f"{epoch}," + ",".join(values) + f",{acc}\n"
                 f.write(line)
         
         logger.info(f"CSV format saved to {csv_path}")

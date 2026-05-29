@@ -43,7 +43,22 @@ class GateVisualizer:
                 raise FileNotFoundError(f"No gate tracking data found in {self.tracking_dir}")
         
         with open(self.final_path, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+        
+        # 尝试从 configuration.json 读取 val_interval
+        config_path = os.path.join(os.path.dirname(os.path.dirname(self.tracking_dir)), 'configuration.json')
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                data['val_interval'] = config.get('val_interval', 2)
+                logger.info(f"Loaded val_interval={data['val_interval']} from configuration.json")
+            except:
+                data['val_interval'] = 2  # 默认值
+        else:
+            data['val_interval'] = 2  # 默认值
+        
+        return data
     
     def plot_gate_evolution(self, save_path=None, figsize=(12, 8)):
         """
@@ -57,6 +72,7 @@ class GateVisualizer:
         
         epochs = data['epochs']
         gate_values = data['gate_values']
+        accuracy = data.get('accuracy', [])
         
         fig, ax = plt.subplots(figsize=figsize)
         
@@ -88,6 +104,92 @@ class GateVisualizer:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             logger.info(f"Gate evolution plot saved to {save_path}")
+        else:
+            plt.show()
+        
+        return fig
+    
+    def plot_gate_and_accuracy(self, save_path=None, figsize=(14, 10)):
+        """
+        绘制 gate 参数和 accuracy 随 epoch 的联合变化曲线
+        
+        Args:
+            save_path: 保存路径（可选）
+            figsize: 图像尺寸
+        """
+        data = self.load_data()
+        
+        epochs = data['epochs']
+        gate_values = data['gate_values']
+        accuracy = data.get('accuracy', [])
+        
+        if not accuracy:
+            logger.warning("No accuracy data found in tracking results")
+            return None
+        
+        # 关键修复：使用配置中的 val_interval 生成正确的 epoch 序列
+        num_accuracy_points = len(accuracy)
+        last_epoch_num = epochs[-1] if epochs else 0
+        
+        # 从配置中读取验证间隔
+        val_interval = data.get('val_interval', 2)
+        
+        # 生成正确的 epoch 序列：0, val_interval, 2*val_interval, ..., 直到最后一个验证点
+        # 注意：epoch 0 也有初始验证
+        epochs_for_accuracy = [i * val_interval for i in range(num_accuracy_points)]
+        
+        # 确保最后一个 epoch 正确（可能由于验证条件略有不同）
+        if epochs_for_accuracy and epochs_for_accuracy[-1] != last_epoch_num:
+            # 如果计算的最后一个 epoch 与实际不符，使用实际值
+            logger.warning(f"Last accuracy epoch {epochs_for_accuracy[-1]} != last training epoch {last_epoch_num}, adjusting...")
+        
+        logger.info(f"Using val_interval={val_interval} from config, "
+                   f"plotting {num_accuracy_points} accuracy points at epochs: "
+                   f"{epochs_for_accuracy[0]}, {epochs_for_accuracy[1] if len(epochs_for_accuracy)>1 else 'N/A'}, ..., {epochs_for_accuracy[-1]}")
+        
+        # 创建双轴图表
+        fig, ax1 = plt.subplots(figsize=figsize)
+        
+        # 左轴：Gate 值（绘制所有 epoch）
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        lines1 = []
+        for i, (layer_name, values) in enumerate(gate_values.items()):
+            color = colors[i % len(colors)]
+            line, = ax1.plot(epochs, values, marker='o', linewidth=2, markersize=4,
+                           label=layer_name, color=color, alpha=0.8)
+            lines1.append(line)
+        
+        ax1.axhline(y=0.0, color='red', linestyle='--', linewidth=1.5, alpha=0.6,
+                   label='Initial Gate (0.0)')
+        
+        ax1.set_xlabel('Epoch', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Gate Parameter Value (g)', fontsize=14, fontweight='bold', color='#1f77b4')
+        ax1.tick_params(axis='y', labelcolor='#1f77b4', labelsize=12)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.set_xlim(-1, last_epoch_num + 1)
+        
+        # 右轴：Accuracy（使用正确的 epoch 序列）
+        ax2 = ax1.twinx()
+        line_acc, = ax2.plot(epochs_for_accuracy, accuracy, marker='s', linewidth=2.5, markersize=5,
+                            label='Validation Accuracy', color='#e74c3c', alpha=0.9)
+        
+        ax2.set_ylabel('Validation Accuracy', fontsize=14, fontweight='bold', color='#e74c3c')
+        ax2.tick_params(axis='y', labelcolor='#e74c3c', labelsize=12)
+        
+        # 合并图例
+        lines = lines1 + [line_acc]
+        labels = [l.get_label() for l in lines]
+        ax1.legend(lines, labels, loc='best', fontsize=11)
+        
+        # 标题
+        ax1.set_title('Gate Parameter and Validation Accuracy Evolution During Training', 
+                     fontsize=16, fontweight='bold', pad=15)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Gate & Accuracy evolution plot saved to {save_path}")
         else:
             plt.show()
         
@@ -168,11 +270,15 @@ class GateVisualizer:
         
         logger.info("Generating gate parameter visualizations...")
         
-        # 1. 演化曲线
+        # 1. Gate 演化曲线
         evolution_path = os.path.join(output_dir, 'gate_evolution.png')
         self.plot_gate_evolution(save_path=evolution_path)
         
-        # 2. 对比柱状图
+        # 2. Gate 和 Accuracy 联合演化曲线（新增）
+        joint_path = os.path.join(output_dir, 'gate_and_accuracy.png')
+        self.plot_gate_and_accuracy(save_path=joint_path)
+        
+        # 3. 对比柱状图
         bar_path = os.path.join(output_dir, 'gate_comparison.png')
         self.plot_bar_comparison(save_path=bar_path)
         

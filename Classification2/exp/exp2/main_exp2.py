@@ -74,9 +74,27 @@ def main_exp2(config):
     validation_method = 'StratifiedShuffleSplit'
     labels = my_data.labels_df.values.flatten()
 
-    # 分割数据集
-    test_indices = []
+    # Split dataset
+    test_data = my_data
+    test_indices = None  # will be converted to empty list in `split_dataset`, if also test_set_ratio == 0
+    val_data = my_data
     val_indices = []
+    if config['test_pattern']:  # used if test data come from different files / file patterns
+        test_data = data_class(config['data_dir'], pattern=config['test_pattern'], n_proc=-1, config=config)
+        test_indices = test_data.all_IDs
+    if config['test_from']:  # load test IDs directly from file, if available, otherwise use `test_set_ratio`. Can work together with `test_pattern`
+        test_indices = list(set([line.rstrip() for line in open(config['test_from']).readlines()]))
+        try:
+            test_indices = [int(ind) for ind in test_indices]  # integer indices
+        except ValueError:
+            pass  # in case indices are non-integers
+        logger.info("Loaded {} test IDs from file: '{}'".format(len(test_indices), config['test_from']))
+    if config['val_pattern']:  # used if val data come from different files / file patterns
+        val_data = data_class(config['data_dir'], pattern=config['val_pattern'], n_proc=-1, config=config)
+        val_indices = val_data.all_IDs
+
+    # Note: currently a validation set must exist, either with `val_pattern` or `val_ratio`
+    # Using a `val_pattern` means that `val_ratio` == 0 and `test_ratio` == 0
     if config['val_ratio'] > 0:
         train_indices, val_indices, test_indices = split_dataset(
             data_indices=my_data.all_IDs,
@@ -91,6 +109,8 @@ def main_exp2(config):
         val_indices = val_indices[0]
     else:
         train_indices = my_data.all_IDs
+        if test_indices is None:
+            test_indices = []
 
     logger.info("{} samples for training".format(len(train_indices)))
     logger.info("{} samples for validation".format(len(val_indices)))
@@ -115,8 +135,18 @@ def main_exp2(config):
     
     if normalizer is not None:
         if len(val_indices):
-            val_data = data_class(config['data_dir'], pattern=config['pattern'], n_proc=-1, config=config)
-            val_data.feature_df.loc[val_indices] = normalizer.normalize(val_data.feature_df.loc[val_indices])
+            # 如果验证集来自独立文件（val_pattern），直接使用 val_data
+            # 否则需要重新加载并应用归一化
+            if config.get('val_pattern'):
+                # 验证集来自独立文件，直接归一化
+                val_data.feature_df.loc[val_indices] = normalizer.normalize(val_data.feature_df.loc[val_indices])
+            else:
+                # 验证集从训练集分割出来，需要重新加载
+                val_data_reload = data_class(config['data_dir'], pattern=config['pattern'], n_proc=-1, config=config)
+                val_data_reload.feature_df.loc[val_indices] = normalizer.normalize(val_data_reload.feature_df.loc[val_indices])
+                val_data = val_data_reload
+        if len(test_indices):
+            test_data.feature_df.loc[test_indices] = normalizer.normalize(test_data.feature_df.loc[test_indices])
 
     # 创建模型
     logger.info("Creating model ...")
@@ -178,7 +208,7 @@ def main_exp2(config):
     # 创建数据加载器
     dataset_class, collate_fn, runner_class = pipeline_factory(config)
     
-    val_dataset = dataset_class(my_data, val_indices)
+    val_dataset = dataset_class(val_data, val_indices)
     val_loader = DataLoader(dataset=val_dataset, batch_size=config['batch_size'],
                            shuffle=False, num_workers=config['num_workers'],
                            pin_memory=True, collate_fn=lambda x: collate_fn(x, max_len=model.max_len))
@@ -213,9 +243,10 @@ def main_exp2(config):
         best_metrics = aggr_metrics_val.copy()
         best_value = 1e16 if config['key_metric'] in NEG_METRICS else -1e16
 
-    # 记录初始 gate 值
+    # 记录初始 gate 值和 accuracy
     if gate_tracker is not None:
-        gate_tracker.record_epoch_gates(0, model)
+        initial_accuracy = aggr_metrics_val.get('accuracy', None) if len(val_indices) > 0 else None
+        gate_tracker.record_epoch_gates(0, model, accuracy=initial_accuracy)
 
     logger.info('Starting training with gate parameter tracking...')
     
@@ -237,16 +268,19 @@ def main_exp2(config):
             *utils.readable_time(epoch_runtime)))
         total_epoch_time += epoch_runtime
 
-        # 记录 gate 值
-        if gate_tracker is not None:
-            gate_tracker.record_epoch_gates(epoch, model)
-
         # 验证
+        current_accuracy = None
         if len(val_indices) > 0 and ((epoch == config["epochs"]) or (epoch == start_epoch + 1) or (epoch % config['val_interval'] == 0)):
             aggr_metrics_val, best_metrics, best_value = validate(
                 val_evaluator, tensorboard_writer, config, best_metrics, best_value, epoch)
             metrics_names, metrics_values = zip(*aggr_metrics_val.items())
             metrics.append(list(metrics_values))
+            # 获取当前 epoch 的 validation accuracy
+            current_accuracy = aggr_metrics_val.get('accuracy', None)
+
+        # 记录 gate 值和 accuracy
+        if gate_tracker is not None:
+            gate_tracker.record_epoch_gates(epoch, model, accuracy=current_accuracy)
 
         # 保存模型
         utils.save_model(os.path.join(config['save_dir'], 'model_{}.pth'.format(mark)), epoch, model, optimizer)
