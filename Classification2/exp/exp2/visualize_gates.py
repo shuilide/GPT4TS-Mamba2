@@ -43,22 +43,7 @@ class GateVisualizer:
                 raise FileNotFoundError(f"No gate tracking data found in {self.tracking_dir}")
         
         with open(self.final_path, 'r') as f:
-            data = json.load(f)
-        
-        # 尝试从 configuration.json 读取 val_interval
-        config_path = os.path.join(os.path.dirname(os.path.dirname(self.tracking_dir)), 'configuration.json')
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                data['val_interval'] = config.get('val_interval', 2)
-                logger.info(f"Loaded val_interval={data['val_interval']} from configuration.json")
-            except:
-                data['val_interval'] = 2  # 默认值
-        else:
-            data['val_interval'] = 2  # 默认值
-        
-        return data
+            return json.load(f)
     
     def plot_gate_evolution(self, save_path=None, figsize=(12, 8)):
         """
@@ -127,25 +112,22 @@ class GateVisualizer:
             logger.warning("No accuracy data found in tracking results")
             return None
         
-        # 关键修复：使用配置中的 val_interval 生成正确的 epoch 序列
+        # 关键修复：根据验证间隔生成正确的 epoch 序列
+        # accuracy 是每隔 val_interval 个 epoch 测试一次（如 0, 2, 4, ..., 100）
         num_accuracy_points = len(accuracy)
-        last_epoch_num = epochs[-1] if epochs else 0
+        total_epochs = len(epochs)
         
-        # 从配置中读取验证间隔
-        val_interval = data.get('val_interval', 2)
+        # 计算验证间隔
+        # 如果有 51 个 accuracy 数据点，对应 epoch 0-100，则间隔为 2
+        if num_accuracy_points > 1:
+            val_interval = (total_epochs - 1) // (num_accuracy_points - 1)
+        else:
+            val_interval = 1
         
-        # 生成正确的 epoch 序列：0, val_interval, 2*val_interval, ..., 直到最后一个验证点
-        # 注意：epoch 0 也有初始验证
+        # 生成正确的 epoch 序列：0, val_interval, 2*val_interval, ...
         epochs_for_accuracy = [i * val_interval for i in range(num_accuracy_points)]
         
-        # 确保最后一个 epoch 正确（可能由于验证条件略有不同）
-        if epochs_for_accuracy and epochs_for_accuracy[-1] != last_epoch_num:
-            # 如果计算的最后一个 epoch 与实际不符，使用实际值
-            logger.warning(f"Last accuracy epoch {epochs_for_accuracy[-1]} != last training epoch {last_epoch_num}, adjusting...")
-        
-        logger.info(f"Using val_interval={val_interval} from config, "
-                   f"plotting {num_accuracy_points} accuracy points at epochs: "
-                   f"{epochs_for_accuracy[0]}, {epochs_for_accuracy[1] if len(epochs_for_accuracy)>1 else 'N/A'}, ..., {epochs_for_accuracy[-1]}")
+        logger.info(f"Validation interval: {val_interval}, plotting {num_accuracy_points} accuracy points at epochs: {epochs_for_accuracy[0]}, {epochs_for_accuracy[1]}, ..., {epochs_for_accuracy[-1]}")
         
         # 创建双轴图表
         fig, ax1 = plt.subplots(figsize=figsize)
@@ -166,7 +148,7 @@ class GateVisualizer:
         ax1.set_ylabel('Gate Parameter Value (g)', fontsize=14, fontweight='bold', color='#1f77b4')
         ax1.tick_params(axis='y', labelcolor='#1f77b4', labelsize=12)
         ax1.grid(True, alpha=0.3, linestyle='--')
-        ax1.set_xlim(-1, last_epoch_num + 1)
+        ax1.set_xlim(-1, total_epochs + 1)
         
         # 右轴：Accuracy（使用正确的 epoch 序列）
         ax2 = ax1.twinx()

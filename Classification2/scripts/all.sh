@@ -19,7 +19,7 @@ python src/main.py \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2 \
-    --gpu 4
+    --gpu 3
 
 python src/main.py \
     --output_dir experiments \
@@ -43,6 +43,7 @@ python src/main.py \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2 \
+    --no_attn_pooling
 
 python src/main.py \
     --output_dir experiments \
@@ -66,6 +67,7 @@ python src/main.py \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2 \
+    --no_attn_pooling
 
 python src/main.py \
     --output_dir experiments \
@@ -89,6 +91,7 @@ python src/main.py \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2 \
+    --no_attn_pooling
 
 python src/main.py \
     --output_dir experiments \
@@ -112,6 +115,7 @@ python src/main.py \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2 \
+    --no_attn_pooling
 
 python src/main.py \
     --output_dir experiments \
@@ -134,8 +138,8 @@ python src/main.py \
     --gpu 4 \
     --seed 42 \
     --gpt_layers 6 \
-    --num_mamba_layers 2 \
-
+    --num_mamba_layers 0 \
+    --no_stat_prompt \
 
 python src/main.py \
     --output_dir experiments \
@@ -155,7 +159,7 @@ python src/main.py \
     --pos_encoding learnable \
     --task classification \
     --key_metric accuracy \
-    --gpu 4 \
+    --gpu 3 \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2
@@ -178,7 +182,7 @@ python src/main.py \
     --pos_encoding learnable \
     --task classification \
     --key_metric accuracy \
-    --gpu 4 \
+    --gpu 3 \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2
@@ -202,7 +206,7 @@ python src/main.py \
     --task classification \
     --key_metric accuracy \
     --seed 42 \
-    --gpu 4 \
+    --gpu 3 \
     --gpt_layers 6 \
     --num_mamba_layers 2
 
@@ -225,9 +229,9 @@ python src/main.py \
     --task classification \
     --key_metric accuracy \
     --seed 42 \
-    --gpu 4 \
-    --gpt_layers 6 \
-    --num_mamba_layers 2 \
+    --gpu 5 \
+    --num_mamba_layers 0 \
+    --no_stat_prompt \
 
 python src/main.py \
     --output_dir experiments \
@@ -248,9 +252,9 @@ python src/main.py \
     --task classification \
     --key_metric accuracy \
     --seed 42 \
-    --gpu 4 \
-    --gpt_layers 6 \
-    --num_mamba_layers 2 \
+    --gpu 5 \
+    --num_mamba_layers 0 \
+    --no_stat_prompt \
 
 python src/main.py \
     --output_dir experiments \
@@ -270,7 +274,9 @@ python src/main.py \
     --pos_encoding learnable \
     --task classification \
     --key_metric accuracy \
-    --gpu 4 \
+    --gpu 3 \
     --seed 42 \
     --gpt_layers 6 \
     --num_mamba_layers 2
+
+

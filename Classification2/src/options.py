@@ -20,6 +20,7 @@ class Options(object):
         self.parser.add_argument('--num_mamba_layers', type=int, default=2, help='Number of Mamba adapter layers')
         self.parser.add_argument('--no_stat_prompt', action='store_true', help='Disable statistical prompt')
         self.parser.add_argument('--no_attn_pooling', action='store_true', help='Disable attention pooling')
+        self.parser.add_argument('--no_pretrained', action='store_true', help='Disable pre-trained GPT-2 weights (use random initialization)')
 
         ## Run from command-line arguments
         # I/O

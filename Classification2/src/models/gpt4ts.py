@@ -104,7 +104,22 @@ class gpt4ts(nn.Module):
         self.enc_embedding = DataEmbedding(self.feat_dim * self.patch_size, config['d_model'], config['dropout'])
 
         # ✅ 修复2：关闭不必要的输出，节省显存
-        self.gpt2 = GPT2Model.from_pretrained('gpt2', output_hidden_states=False, output_attentions=False)
+        # 实验3：支持随机初始化对比（Pre-trained vs From Scratch）
+        use_pretrained = not config.get('no_pretrained', False)
+        if use_pretrained:
+            self.gpt2 = GPT2Model.from_pretrained('gpt2', output_hidden_states=False, output_attentions=False)
+            print("✓ Loading pre-trained GPT-2 weights (Frozen)")
+        else:
+            from transformers import GPT2Config
+            gpt2_config = GPT2Config(
+                n_positions=1024,
+                n_embd=768,
+                n_layer=12,
+                n_head=12,
+                n_inner=3072
+            )
+            self.gpt2 = GPT2Model(gpt2_config)
+            print("✓ Using randomly initialized GPT-2 (From Scratch, Frozen)")
         
         # ✅ 修复5：扩展GPT-2位置编码以支持长序列（使用线性插值）
         # 计算最大可能的patch数量（考虑padding和prompt token）
@@ -220,7 +235,7 @@ class gpt4ts(nn.Module):
             x_std = x_enc.std(dim=1)
             x_max = x_enc.max(dim=1)[0]
             x_min = x_enc.min(dim=1)[0]
-            stats = torch.cat([x_mean, x_std, x_max, x_min], dim=-1)
+            stats = torch.cat([x_mean,x_std,x_max, x_min], dim=-1)
             prompt_token = self.prompt_generator(stats).unsqueeze(1)
 
         # Patch处理
@@ -244,9 +259,20 @@ class gpt4ts(nn.Module):
         # 创新点3：分类头
         if self.use_attn_pooling:
             query = self.cls_query.expand(B, -1, -1)
-            pooled_out, _ = self.pool_attention(query, outputs, outputs)
+            # 获取注意力权重
+            pooled_out, attn_weights = self.pool_attention(query, outputs, outputs)
+            
+            # 实验4：保存注意力权重 (Shape: [B, 1, N])
+            if getattr(self, 'return_attn', False):
+                self.last_attention_weights = attn_weights
+            
             pooled_out = pooled_out.squeeze(1)
             pooled_out = self.pool_ln(pooled_out)
+            
+            # 实验4：保存池化后的特征 (Shape: [B, D])
+            if getattr(self, 'return_attn', False):
+                self.last_pooled_feature = pooled_out
+                
             outputs = self.out_layer(pooled_out)
         else:
             # ✅ 使用自适应池化支持任意长度
@@ -254,6 +280,11 @@ class gpt4ts(nn.Module):
             outputs = outputs.transpose(1, 2)  # [B, D, N]
             outputs = self.adaptive_pool(outputs).squeeze(-1)  # [B, D]
             outputs = self.ln_proj(outputs)
+            
+            # 实验4：保存池化后的特征 (Shape: [B, D])
+            if getattr(self, 'return_attn', False):
+                self.last_pooled_feature = outputs
+                
             outputs = self.out_layer(outputs)
 
         return outputs
