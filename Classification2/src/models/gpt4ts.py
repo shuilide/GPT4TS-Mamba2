@@ -219,12 +219,20 @@ class gpt4ts(nn.Module):
             self.pool_ln = nn.LayerNorm(self.d_model)
             self.out_layer = nn.Linear(self.d_model, self.num_classes)
             print("✓ Innovation 3: Attn Pooling enabled")
+            # 实验4：默认关闭属性捕获
+            self.return_attn = False
         else:
             # ✅ 修复6：使用自适应池化支持任意长度序列
             self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
             self.ln_proj = nn.LayerNorm(self.d_model)
             self.out_layer = nn.Linear(self.d_model, self.num_classes)
             print("✓ Innovation 3: Attn Pooling disabled, using Adaptive Pooling")
+            self.return_attn = False
+        
+        # ✅ 关键修复：统一初始化中间结果存储属性（无论哪种 pooling 模式）
+        # 这样可以避免 extract_data.py 访问不存在的属性
+        self.last_attention_weights = None
+        self.last_pooled_feature = None
 
     def forward(self, x_enc, x_mark_enc, x_dec=None, x_mark_dec=None, mask=None):
         B, L, M = x_enc.shape
@@ -262,16 +270,15 @@ class gpt4ts(nn.Module):
             # 获取注意力权重
             pooled_out, attn_weights = self.pool_attention(query, outputs, outputs)
             
-            # 实验4：保存注意力权重 (Shape: [B, 1, N])
-            if getattr(self, 'return_attn', False):
-                self.last_attention_weights = attn_weights
+            # ✅ 实验4：保存注意力权重 (Shape: [B, 1, N])
+            # 关键修复：无论 return_attn 是否为 True，都保存以便 extract_data.py 使用
+            self.last_attention_weights = attn_weights
             
             pooled_out = pooled_out.squeeze(1)
             pooled_out = self.pool_ln(pooled_out)
             
-            # 实验4：保存池化后的特征 (Shape: [B, D])
-            if getattr(self, 'return_attn', False):
-                self.last_pooled_feature = pooled_out
+            # ✅ 实验4：保存池化后的特征 (Shape: [B, D])
+            self.last_pooled_feature = pooled_out
                 
             outputs = self.out_layer(pooled_out)
         else:
@@ -281,9 +288,8 @@ class gpt4ts(nn.Module):
             outputs = self.adaptive_pool(outputs).squeeze(-1)  # [B, D]
             outputs = self.ln_proj(outputs)
             
-            # 实验4：保存池化后的特征 (Shape: [B, D])
-            if getattr(self, 'return_attn', False):
-                self.last_pooled_feature = outputs
+            # ✅ 实验4：保存池化后的特征 (Shape: [B, D])
+            self.last_pooled_feature = outputs
                 
             outputs = self.out_layer(outputs)
 
