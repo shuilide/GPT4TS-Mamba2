@@ -1,0 +1,19 @@
+python src/main.py \
+    --output_dir experiments \
+    --comment "classification from Scratch" \
+    --name InsectWingbeat \
+    --records_file Classification_records.xls \
+    --data_dir ./datasets/InsectWingbeat \
+    --data_class tsra \
+    --pattern TRAIN \
+    --val_pattern TEST \
+    --epochs 100 \
+    --lr 0.001 \
+    --patch_size 8 \
+    --stride 8 \
+    --optimizer AdamW \
+    --d_model 768 \
+    --pos_encoding learnable \
+    --task classification \
+    --key_metric accuracy \
+    --seed 42

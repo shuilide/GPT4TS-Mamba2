@@ -27,6 +27,98 @@ except ImportError:
 # ==========================================
 # 创新点2：平行 Mamba-Attention 适配器模块
 # ==========================================
+
+# ==========================================
+# 纯 Mamba 层（实验五：Pure Mamba架构）
+# ==========================================
+class PureMambaLayer(nn.Module):
+    """
+    纯Mamba架构：不使用GPT层，直接处理输入
+    数据流：input → Mamba → output
+    """
+
+    def __init__(self, d_model, use_official_mamba: bool):
+        super().__init__()
+        self.use_official_mamba = use_official_mamba
+
+        # 可训练的 Mamba 模块
+        if use_official_mamba:
+            self.mamba = Mamba2(
+                d_model=d_model,
+                d_state=16,
+                d_conv=4,
+                expand=2,
+                headdim=128
+            )
+        else:
+            self.mamba = Mamba2Block(
+                d_model=d_model,
+                d_state=16,
+                d_conv=4,
+                expand=2,
+                headdim=128
+            )
+
+        self.mamba_ln = nn.LayerNorm(d_model)
+
+    def forward(self, hidden_states, *args, **kwargs):
+        # 纯Mamba：直接处理输入，不使用GPT
+        mamba_out = self.mamba(self.mamba_ln(hidden_states))
+        if isinstance(mamba_out, tuple):
+            mamba_out = mamba_out[0]
+
+        # 返回Mamba的输出（保持与GPT2层相同的输出格式）
+        return (mamba_out, None)
+
+
+# ==========================================
+# 串行 Mamba 层（实验五：真正的串行架构）
+# ==========================================
+class SequentialMambaLayer(nn.Module):
+    """
+    串行架构：先过GPT-2层，再过Mamba层，没有门控融合
+    数据流：input → GPT → Mamba → output
+    """
+
+    def __init__(self, gpt_layer, d_model, use_official_mamba: bool):
+        super().__init__()
+        self.gpt_layer = gpt_layer  # 冻结的原始 GPT 层
+        self.use_official_mamba = use_official_mamba
+
+        # 可训练的 Mamba 模块
+        if use_official_mamba:
+            self.mamba = Mamba2(
+                d_model=d_model,
+                d_state=16,
+                d_conv=4,
+                expand=2,
+                headdim=128
+            )
+        else:
+            self.mamba = Mamba2Block(
+                d_model=d_model,
+                d_state=16,
+                d_conv=4,
+                expand=2,
+                headdim=128
+            )
+
+        self.mamba_ln = nn.LayerNorm(d_model)
+
+    def forward(self, hidden_states, *args, **kwargs):
+        # 串行：先过GPT，再过Mamba
+        with torch.no_grad():
+            gpt_out = self.gpt_layer(hidden_states, *args, **kwargs)[0]
+
+        # GPT输出直接送入Mamba（无门控）
+        mamba_out = self.mamba(self.mamba_ln(gpt_out))
+        if isinstance(mamba_out, tuple):
+            mamba_out = mamba_out[0]
+
+        # 返回Mamba的输出
+        return (mamba_out, None)
+
+
 class ParallelMambaAdapter(nn.Module):
     def __init__(self, gpt_layer, d_model, use_official_mamba: bool):
         super().__init__()
@@ -56,6 +148,7 @@ class ParallelMambaAdapter(nn.Module):
         self.mamba_ln = nn.LayerNorm(d_model)
 
     def forward(self, hidden_states, *args, **kwargs):
+        # 默认：平行融合架构
         # 1. 走冻结的 GPT 层路线 (不需要梯度)
         with torch.no_grad():
             gpt_out = self.gpt_layer(hidden_states, *args, **kwargs)[0]  # 只取hidden_states
@@ -80,6 +173,7 @@ class ParallelMambaAdapter(nn.Module):
         """设置 gate 的初始值（用于实验）"""
         with torch.no_grad():
             self.gate.fill_(initial_value)
+
 
 class gpt4ts(nn.Module):
     def __init__(self, config, data):
@@ -120,45 +214,45 @@ class gpt4ts(nn.Module):
             )
             self.gpt2 = GPT2Model(gpt2_config)
             print("✓ Using randomly initialized GPT-2 (From Scratch, Frozen)")
-        
+
         # ✅ 修复5：扩展GPT-2位置编码以支持长序列（使用线性插值）
         # 计算最大可能的patch数量（考虑padding和prompt token）
         max_patch_num = (self.max_len - self.patch_size) // self.stride + 2  # +1 padding + 1 prompt
-        
+
         if max_patch_num > self.gpt2.config.n_positions:
             old_n_positions = self.gpt2.config.n_positions
-            
+
             # 获取原始位置编码权重
             old_wpe_weight = self.gpt2.wpe.weight.data.clone()  # [1024, 768]
-            
+
             # 使用线性插值创建新的位置编码
             new_wpe_weight = torch.zeros(max_patch_num, self.d_model)
             with torch.no_grad():
                 for i in range(max_patch_num):
                     # 计算在原始编码中的对应位置（可能是小数）
                     original_pos = i * (old_n_positions - 1) / (max_patch_num - 1)
-                    
+
                     # 找到相邻的两个整数位置
                     low = int(original_pos)
                     high = min(low + 1, old_n_positions - 1)
-                    
+
                     # 计算插值权重
                     fraction = original_pos - low
-                    
+
                     # 线性插值
                     new_wpe_weight[i] = (1 - fraction) * old_wpe_weight[low] + fraction * old_wpe_weight[high]
-            
+
             # 创建新的位置编码层并替换
             new_wpe = nn.Embedding(max_patch_num, self.d_model)
             new_wpe.weight.data = new_wpe_weight
-            
+
             # 替换模型中的位置编码
             self.gpt2.wpe = new_wpe
-            
+
             # 重要：同时更新两个配置项
             self.gpt2.config.n_positions = max_patch_num
             self.gpt2.config.max_position_embeddings = max_patch_num
-            
+
             print(f"✓ Extended GPT2 position encoding with interpolation: {old_n_positions} -> {max_patch_num}")
 
         # ==========================================
@@ -181,29 +275,99 @@ class gpt4ts(nn.Module):
         # 支持通过配置控制替换的层数（用于消融实验）
         # ==========================================
         replace_last_n_layers = config.get('num_mamba_layers', 2)  # 支持配置，默认替换最后2层
-        
-        if replace_last_n_layers > 0:
+
+        # 实验五：根据arch_mode决定架构
+        arch_mode = config.get('arch_mode', 'parallel')
+
+        if arch_mode == 'pure_gpt':
+            # 纯GPT-2：不替换任何层，不使用Mamba
+            print("✓ Architecture: Pure GPT-2 (No Mamba adapters)")
+
+        elif arch_mode == 'pure_mamba':
+            # 纯Mamba：将所有GPT层替换为纯Mamba层
+            print("✓ Architecture: Pure Mamba Network (Replacing all GPT layers with Pure Mamba)")
+            for layer_idx in range(self.gpt_layers):
+                # 使用PureMambaLayer（不使用GPT，无门控）
+                self.gpt2.h[layer_idx] = PureMambaLayer(
+                    d_model=config['d_model'],
+                    use_official_mamba=MAMBA2_AVAILABLE
+                )
+
+        elif arch_mode == 'sequential':
+            # 串行架构：前几层GPT-2，后几层Mamba（无门控）
+            print(
+                f"✓ Architecture: Sequential (First {self.gpt_layers - replace_last_n_layers} GPT layers → Last {replace_last_n_layers} Mamba layers)")
             for i in range(replace_last_n_layers):
                 layer_idx = self.gpt_layers - 1 - i
                 original_gpt_layer = self.gpt2.h[layer_idx]
-                # 包装为平行结构（区分官方/简易版Mamba）
-                self.gpt2.h[layer_idx] = ParallelMambaAdapter(
+                # 使用SequentialMambaLayer（无门控的串行架构）
+                self.gpt2.h[layer_idx] = SequentialMambaLayer(
                     gpt_layer=original_gpt_layer,
                     d_model=config['d_model'],
                     use_official_mamba=MAMBA2_AVAILABLE
                 )
-            print(f"✓ Replaced last {replace_last_n_layers} layers with Parallel Mamba-Attention Adapters")
-        else:
-            print(f"✓ Using pure GPT2 without Mamba adapters (baseline)")
+
+        else:  # parallel（默认）
+            # 平行融合架构：你的方法
+            if replace_last_n_layers > 0:
+                for i in range(replace_last_n_layers):
+                    layer_idx = self.gpt_layers - 1 - i
+                    original_gpt_layer = self.gpt2.h[layer_idx]
+                    # 包装为平行结构（区分官方/简易版Mamba）
+                    self.gpt2.h[layer_idx] = ParallelMambaAdapter(
+                        gpt_layer=original_gpt_layer,
+                        d_model=config['d_model'],
+                        use_official_mamba=MAMBA2_AVAILABLE
+                    )
+                print(f"✓ Replaced last {replace_last_n_layers} layers with Parallel Mamba-Attention Adapters")
+            else:
+                print(f"✓ Using pure GPT2 without Mamba adapters (baseline)")
 
         self.gpt2.h = self.gpt2.h[:self.gpt_layers]
 
-        # ✅ 修复3：正确解冻Mamba2层 + 创新点2的gate参数
-        for name, param in self.gpt2.named_parameters():
-            if 'ln' in name or 'wpe' in name or 'mamba' in name.lower() or 'gate' in name.lower():
+        # ==========================================
+        # 冻结策略（支持三种模式，与 exp6 实验一致）
+        # ==========================================
+        freeze_strategy = config.get('freeze_strategy', 'partial_frozen')  # 默认使用部分冻结
+
+        if freeze_strategy == 'all_frozen':
+            # 策略1：全冻结 - 只微调 Mamba、Gate 和分类头，冻结所有 GPT2 参数
+            for name, param in self.gpt2.named_parameters():
+                if 'mamba' in name.lower() or 'gate' in name.lower():
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+            print(f"✓ Freeze Strategy: ALL FROZEN")
+            print(f"  - GPT2 (Attention + FFN + LN + WPE): Frozen")
+            print(f"  - Mamba + Gate: Trainable")
+
+        elif freeze_strategy == 'partial_frozen':
+            # 策略2：部分冻结（与 Classification2 一致）- 微调 LN + WPE + Mamba + Gate
+            for name, param in self.gpt2.named_parameters():
+                if 'ln' in name or 'wpe' in name or 'mamba' in name.lower() or 'gate' in name.lower():
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+            print(f"✓ Freeze Strategy: PARTIAL FROZEN (Classification2 style)")
+            print(f"  - GPT2 (Attention + FFN): Frozen")
+            print(f"  - GPT2 (LN + WPE) + Mamba + Gate: Trainable")
+
+        elif freeze_strategy == 'all_finetune':
+            # 策略3：全微调 - 所有参数都可训练
+            for param in self.gpt2.parameters():
                 param.requires_grad = True
-            else:
-                param.requires_grad = False
+            print(f"✓ Freeze Strategy: ALL FINETUNE")
+            print(f"  - All GPT2 + Mamba + Gate: Trainable")
+
+        else:
+            raise ValueError(
+                f"Unknown freeze_strategy: {freeze_strategy}. Choose from ['all_frozen', 'partial_frozen', 'all_finetune']")
+
+        # ✅ 统计可训练参数数量
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(
+            f"✓ Total Parameters: {total_params:,} | Trainable: {trainable_params:,} ({trainable_params / total_params * 100:.2f}%)")
 
         # ✅ 修复4：删除硬编码的设备移动（让main.py统一处理）
         self.act = F.gelu
@@ -228,7 +392,7 @@ class gpt4ts(nn.Module):
             self.out_layer = nn.Linear(self.d_model, self.num_classes)
             print("✓ Innovation 3: Attn Pooling disabled, using Adaptive Pooling")
             self.return_attn = False
-        
+
         # ✅ 关键修复：统一初始化中间结果存储属性（无论哪种 pooling 模式）
         # 这样可以避免 extract_data.py 访问不存在的属性
         self.last_attention_weights = None
@@ -243,7 +407,7 @@ class gpt4ts(nn.Module):
             x_std = x_enc.std(dim=1)
             x_max = x_enc.max(dim=1)[0]
             x_min = x_enc.min(dim=1)[0]
-            stats = torch.cat([x_mean,x_std,x_max,x_min], dim=-1)
+            stats = torch.cat([x_mean, x_std, x_max, x_min], dim=-1)
             prompt_token = self.prompt_generator(stats).unsqueeze(1)
 
         # Patch处理
@@ -269,17 +433,17 @@ class gpt4ts(nn.Module):
             query = self.cls_query.expand(B, -1, -1)
             # 获取注意力权重
             pooled_out, attn_weights = self.pool_attention(query, outputs, outputs)
-            
+
             # ✅ 实验4：保存注意力权重 (Shape: [B, 1, N])
             # 关键修复：无论 return_attn 是否为 True，都保存以便 extract_data.py 使用
             self.last_attention_weights = attn_weights
-            
+
             pooled_out = pooled_out.squeeze(1)
             pooled_out = self.pool_ln(pooled_out)
-            
+
             # ✅ 实验4：保存池化后的特征 (Shape: [B, D])
             self.last_pooled_feature = pooled_out
-                
+
             outputs = self.out_layer(pooled_out)
         else:
             # ✅ 使用自适应池化支持任意长度
@@ -287,10 +451,10 @@ class gpt4ts(nn.Module):
             outputs = outputs.transpose(1, 2)  # [B, D, N]
             outputs = self.adaptive_pool(outputs).squeeze(-1)  # [B, D]
             outputs = self.ln_proj(outputs)
-            
+
             # ✅ 实验4：保存池化后的特征 (Shape: [B, D])
             self.last_pooled_feature = outputs
-                
+
             outputs = self.out_layer(outputs)
 
         return outputs
