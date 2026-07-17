@@ -97,25 +97,7 @@ python src/main.py \
     --seed 42
 ```
 
-### 2.3 数据集配置
-
-| 数据集 | lr | patch_size | stride | num_mamba_layers | no_stat_prompt | no_attn_pooling |
-|--------|----|------------|--------|------------------|----------------|-----------------|
-| EthanolConcentration | 0.0001 | 16 | 8 | 2 | - | - |
-| ArticularyWordRecognition | 0.0005 | 16 | 2 | 2 | - | ✅ |
-| AtrialFibrillation | 0.0005 | 16 | 2 | 2 | - | ✅ |
-| BasicMotions | 0.0005 | 16 | 2 | 2 | - | ✅ |
-| CharacterTrajectories | 0.0005 | 16 | 2 | 2 | - | ✅ |
-| Cricket | 0.001 | 8 | 8 | 2 | - | ✅ |
-| Epilepsy | 0.0005 | 16 | 2 | 0 | ✅ | - |
-| ERing | 0.0005 | 16 | 2 | 2 | - | - |
-| FingerMovements | 0.0005 | 16 | 2 | 2 | - | - |
-| Libras | 0.0005 | 16 | 2 | 2 | - | - |
-| NATOPS | 0.0005 | 16 | 2 | 0 | ✅ | - |
-| PhonemeSpectra | 0.0005 | 16 | 2 | 0 | ✅ | - |
-| RacketSports | 0.0005 | 8 | 2 | 2 | - | - |
-
-### 2.4 特殊实验
+### 2.3 特殊实验
 
 #### 实验2：门控追踪
 
@@ -142,7 +124,7 @@ cd Classification2/exp/exp4
 bash run_exp4.sh ../../results/BasicMotions_pretrained
 ```
 
-### 2.5 关键参数
+### 2.4 关键参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
